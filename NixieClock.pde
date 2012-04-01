@@ -1,6 +1,13 @@
-// 
-// Arduinix 6 bulb 
-// 
+// NiXie Clock based on Arduinix shield with DS1307 RTC and GPS Sync
+// 14 March 2012 - Sharjeel Aziz (Shaji)
+//
+// This work is licensed under the Creative Commons 
+// Attribution-ShareAlike 3.0 Unported License. To view 
+// a copy of this license, visit 
+// http://creativecommons.org/licenses/by-sa/3.0/ or send 
+// a letter to Creative Commons, 444 Castro Street, 
+// Suite 900, Mountain View, California, 94041, USA.
+//  
 // This code runs a six bulb setup and displays a prototype clock setup.
 // NOTE: the delay is setup for IN-17 nixie bulbs.
 //
@@ -9,21 +16,20 @@
 // www.arduinix.com
 // 2008 
 //
-// 03/14/2012 Shaji - Added support for GPS and RTC
-//
+
 
 // SN74141 : Truth Table
-//D C B A #
-//L,L,L,L 0
-//L,L,L,H 1
-//L,L,H,L 2
-//L,L,H,H 3
-//L,H,L,L 4
-//L,H,L,H 5
-//L,H,H,L 6
-//L,H,H,H 7
-//H,L,L,L 8
-//H,L,L,H 9
+// D C B A #
+// L,L,L,L 0
+// L,L,L,H 1
+// L,L,H,L 2
+// L,L,H,H 3
+// L,H,L,L 4
+// L,H,L,H 5
+// L,H,H,L 6
+// L,H,H,H 7
+// H,L,L,L 8
+// H,L,L,H 9
 
 
 #include <Time.h>  
@@ -31,9 +37,22 @@
 #include <DS1307RTC.h>		// a basic DS1307 library that returns time as a time_t
 #include <TinyGPS.h>		// http://arduiniana.org
 #include <SoftwareSerial.h>	// http://arduiniana.org
+#include <Timezone.h>		// https://github.com/JChristensen/Timezone
+
+//US Eastern Time Zone (New York, Detroit)
+TimeChangeRule usEdt = {"EDT", Second, Sun, Mar, 2, -240};    //UTC - 4 hours
+TimeChangeRule usEst = {"EST", First, Sun, Nov, 2, -300};     //UTC - 5 hours
+Timezone usEastern(usEdt, usEst);
+
+//If TimeChangeRules are already stored in EEPROM, comment out the three
+//lines above and uncomment the line below.
+//Timezone usEastern(100);    //assumes rules stored at EEPROM address 100
+
+TimeChangeRule *tcr;        //pointer to the time change rule, use to get TZ abbrev
+time_t utc, localTime;
 
 TinyGPS gps; 
-SoftwareSerial serial_gps =  SoftwareSerial(1, 0);  // receive on pin 1
+SoftwareSerial serialGps =  SoftwareSerial(16, 17);  // receive on pin 1
 
 // SN74141 (1)
 int gLedPin_0_a = 2;                
@@ -57,31 +76,53 @@ long gWaitUntil = 0;
   
 #define TIME_SET 14
 #define TIME_UP 15
-#define TIME_DOWN 16
+
+//Function to return the compile date and time as a time_t value
+time_t compileTime(void)
+{
+#define FUDGE 25        //fudge factor to allow for compile time (seconds, YMMV)
+
+	char *compDate = __DATE__, *compTime = __TIME__, *months = "JanFebMarAprMayJunJulAugSepOctNovDec";
+	char chMon[3], *m;
+	int d, y;
+	tmElements_t tm;
+	time_t t;
+
+	strncpy(chMon, compDate, 3);
+	chMon[3] = '\0';
+	m = strstr(months, chMon);
+	tm.Month = ((m - months) / 3 + 1);
+
+	tm.Day = atoi(compDate + 4);
+	tm.Year = atoi(compDate + 7) - 1970;
+	tm.Hour = atoi(compTime);
+	tm.Minute = atoi(compTime + 3);
+	tm.Second = atoi(compTime + 6);
+	t = makeTime(tm);
+	return t + FUDGE;        //add fudge factor to allow for compile time
+}
 
 void setup() 
 {	
+	Serial.begin(9600);
+	Serial.println("Waiting for GPS time ... ");
+
 	hourFormat12();
 
 	// RTC Stuff
 	setSyncProvider(RTC.get);   // the function to get the time from the RTC
 	if (timeStatus() != timeSet) {
-	   //Unable to sync with the RTC
-	   setTime(2,57,00,17,3,12);
+	   Serial.println("Unable to sync with the RTC");
+	   setTime(usEastern.toUTC(compileTime()));
 	}
 	else {
-	   //RTC has set the system time
+	   Serial.println("RTC has set the system time");
 	}
-	//testing omly
-	setTime(0,0,0,0,0,0);
 	
 	// GPS Stuff
-	serial_gps.begin(4800);
+	serialGps.begin(9600);
   	
-	//Sets up the time and display controls to be inputs with internal pull-up resistors enabled
-	pinMode(TIME_DOWN, INPUT);
-	digitalWrite(TIME_DOWN, HIGH);
-	
+	//Sets up the time and display controls to be inputs with internal pull-up resistors enable
 	pinMode(TIME_UP, INPUT);
 	digitalWrite(TIME_UP, HIGH);
 	
@@ -204,17 +245,22 @@ void displayNumberSet( int anod, int num1, int num2 )
 
 void loop() 
 {
-	while (serial_gps.available()) {
-	  gps.encode(serial_gps.read()); // process gps messages
+	while (serialGps.available()) {
+	  gps.encode(serialGps.read()); // process gps messages
 	}
 	
 	// Nothing will change until millis() increments by 1000
 	if (millis() >= gWaitUntil) {
-		gWaitUntil = millis() + 3600000L;   // Make sure we wait for another hour
+		//gWaitUntil = millis() + 3600000L;   // Make sure we wait for another hour
+		gWaitUntil = millis() + 10000L;
 		time_t gpsTime = 0;
 		gpsTime = gpsTimeSync();
 		if (0 != gpsTime) {
+			Serial.println("Got time from gps");
 			RTC.set(gpsTime);
+		}
+		else {
+			Serial.println("Gps time not available");
 		}
 	}
 
@@ -225,15 +271,59 @@ void loop()
 	else {
 		digitalClockDisplay();
 	}
+	digitalClockDisplay2();
+
 	
 	//manualTimeAdjust();
+	
+	// test code
+	bool newData = false;
+	unsigned long chars;
+	unsigned short sentences, failed;
+	
+	// For one second we parse GPS data and report some key values
+	for (unsigned long start = millis(); millis() - start < 1000;)
+	{
+	  while (serialGps.available())
+	  {
+		char c = serialGps.read();
+		// Serial.write(c); // uncomment this line if you want to see the GPS data flowing
+		if (gps.encode(c)) // Did a new valid sentence come in?
+		  newData = true;
+	  }
+	}
+	
+	if (newData)
+	{
+	  float flat, flon;
+	  unsigned long age;
+	  gps.f_get_position(&flat, &flon, &age);
+	  Serial.print("LAT=");
+	  Serial.print(flat == TinyGPS::GPS_INVALID_F_ANGLE ? 0.0 : flat, 6);
+	  Serial.print(" LON=");
+	  Serial.print(flon == TinyGPS::GPS_INVALID_F_ANGLE ? 0.0 : flon, 6);
+	  Serial.print(" SAT=");
+	  Serial.print(gps.satellites() == TinyGPS::GPS_INVALID_SATELLITES ? 0 : gps.satellites());
+	  Serial.print(" PREC=");
+	  Serial.print(gps.hdop() == TinyGPS::GPS_INVALID_HDOP ? 0 : gps.hdop());
+	}
+	
+	gps.stats(&chars, &sentences, &failed);
+	Serial.print(" CHARS=");
+	Serial.print(chars);
+	Serial.print(" SENTENCES=");
+	Serial.print(sentences);
+	Serial.print(" CSUM ERR=");
+	Serial.println(failed);
+	
+	//end test code
 }
 
 void manualTimeAdjust()
 {
 	byte timeSelect = 0;
 
-	//Time Set Routine
+	// time Set Routine
 	boolean switchRead = 1;
 	switchRead = digitalRead(TIME_SET);
 
@@ -257,21 +347,55 @@ void manualTimeAdjust()
 		 	delay(10);
 		 	// add to time
 		}
-
-		switchRead = digitalRead(TIME_DOWN);
-		if (LOW == switchRead) {
-			while (LOW == switchRead) {
-				switchRead = digitalRead(TIME_DOWN);
-			} // do nothing while the switch is low
-			delay(10);
-			//subtract from time
-
-		}
 	}
+}
+
+void digitalClockDisplay2()
+{
+	
+	utc = now();
+	localTime = usEastern.toLocal(utc, &tcr);
+	
+  	// digital clock display of the time
+  	Serial.print(hour());
+  	printDigits(minute());
+  	printDigits(second());
+  	Serial.print(" ");
+  	Serial.print(day());
+  	Serial.print(" ");
+  	Serial.print(month());
+  	Serial.print(" ");
+  	Serial.print(year()); 
+  	Serial.println(); 
+
+  	// digital clock display of the local time
+  	Serial.print(hour(localTime));
+  	printDigits(minute(localTime));
+  	printDigits(second(localTime));
+  	Serial.print(" ");
+  	Serial.print(day(localTime));
+  	Serial.print(" ");
+  	Serial.print(month(localTime));
+  	Serial.print(" ");
+  	Serial.print(year(localTime)); 
+  	Serial.println(); 
+
+}
+
+void printDigits(int digits)
+{
+  // utility function for digital clock display: prints preceding colon and leading 0
+  Serial.print(":");
+  if(digits < 10)
+	Serial.print('0');
+  Serial.print(digits);
 }
 
 void digitalClockDisplay()
 {
+	utc = now();
+	localTime = usEastern.toLocal(utc, &tcr);
+	
 	int lowerHour = 0;
 	int upperHour = 0;
 	int lowerMin = 0;
@@ -286,25 +410,23 @@ void digitalClockDisplay()
 	int lowerYear = 0;
 	int upperYear = 0;
 	
-	int tempHour = hour();
-	int tempMin = minute();
-	int tempSec = second();
+	int tempSec = second(localTime);
 	
 	// get the high and low order values for hours, min, seconds.
-	lowerHour = tempHour % 10;
-	upperHour = tempHour - lowerHour;
-	lowerMin = tempMin % 10;
-	upperMin = tempMin - lowerMin;
+	lowerHour = hour(localTime) % 10;
+	upperHour = hour(localTime) - lowerHour;
+	lowerMin = minute(localTime) % 10;
+	upperMin = minute(localTime) - lowerMin;
 	lowerSecond = tempSec % 10;
 	upperSecond = tempSec - lowerSecond;
 	
 	// get the high and low order values for day, month, year
-	lowerDay = day() % 10;
-	upperDay = day() - lowerDay;
-	lowerMonth = month() % 10;
-	upperMonth = month() - lowerMonth;
+	lowerDay = day(localTime) % 10;
+	upperDay = day(localTime) - lowerDay;
+	lowerMonth = month(localTime) % 10;
+	upperMonth = month(localTime) - lowerMonth;
 	
-	int yy = year();
+	int yy = year(localTime);
 	if (yy >= 2000) {
 		yy = yy - 2000;
 	}
@@ -364,13 +486,12 @@ time_t gpsTimeSync()
 
 time_t gpsTimeToArduinoTime()
 {
-	int offset = 0;
 	// returns time_t from gps date and time with the given offset hours
 	tmElements_t tm;
 	int year;
 	gps.crack_datetime(&year, &tm.Month, &tm.Day, &tm.Hour, &tm.Minute, &tm.Second, NULL, NULL);
 	tm.Year = year - 1970; 
 	time_t time = makeTime(tm);
-	return time + (offset * SECS_PER_HOUR);
+	return time;
 }
 
