@@ -7,36 +7,34 @@
 // http://creativecommons.org/licenses/by-sa/3.0/ or send 
 // a letter to Creative Commons, 444 Castro Street, 
 // Suite 900, Mountain View, California, 94041, USA.
-//  
-// This code runs a six bulb setup and displays a prototype clock setup.
-// NOTE: the delay is setup for IN-17 nixie bulbs.
 //
-// by Jeremy Howa
-// www.robotpirate.com
-// www.arduinix.com
-// 2008 
+// fading transitions sketch for 4-tube board with default connections.
+// based on 6-tube sketch by Emblazed
+// 06/16/2011 - 4-tube-itized by Dave B.
+// 
+// 08/19/2011 - modded for six bulb board, hours, minutes, seconds by Brad L.
 //
+// 09/03/2011 - Added Poxin's 12 hour setting for removing 00 from hours when set to 12 hour time
+// 11/01/2011 - Fixed second to last crossfading digit error, help from Warcabbit - Brad L.
 
 
 // SN74141 : Truth Table
-// D C B A #
-// L,L,L,L 0
-// L,L,L,H 1
-// L,L,H,L 2
-// L,L,H,H 3
-// L,H,L,L 4
-// L,H,L,H 5
-// L,H,H,L 6
-// L,H,H,H 7
-// H,L,L,L 8
-// H,L,L,H 9
-
+//D C B A #
+//L,L,L,L 0
+//L,L,L,H 1
+//L,L,H,L 2
+//L,L,H,H 3
+//L,H,L,L 4
+//L,H,L,H 5
+//L,H,H,L 6
+//L,H,H,H 7
+//H,L,L,L 8
+//H,L,L,H 9
 
 #include <Time.h>  
 #include <Wire.h>  
 #include <DS1307RTC.h>		// a basic DS1307 library that returns time as a time_t
 #include <TinyGPS.h>		// http://arduiniana.org
-#include <SoftwareSerial.h>	// http://arduiniana.org
 #include <Timezone.h>		// https://github.com/JChristensen/Timezone
 
 //US Eastern Time Zone (New York, Detroit)
@@ -52,30 +50,29 @@ TimeChangeRule *tcr;        //pointer to the time change rule, use to get TZ abb
 time_t utc, localTime;
 
 TinyGPS gps; 
-SoftwareSerial serialGps =  SoftwareSerial(16, 17);  // receive on pin 1
-
-// SN74141 (1)
-int gLedPin_0_a = 2;                
-int gLedPin_0_b = 3;
-int gLedPin_0_c = 4;
-int gLedPin_0_d = 5;
-
-// SN74141 (2)
-int gLedPin_1_a = 6;                
-int gLedPin_1_b = 7;
-int gLedPin_1_c = 8;
-int gLedPin_1_d = 9;
-
-// anode pins
-int gLedPin_a_1 = 10;
-int gLedPin_a_2 = 11;
-int gLedPin_a_3 = 12;
-int gLedPin_a_4 = 13;
 
 long gWaitUntil = 0;
-  
+
 #define TIME_SET 14
 #define TIME_UP 15
+
+// SN74141 (1)
+int ledPin_0_a = 2;                
+int ledPin_0_b = 3;
+int ledPin_0_c = 4;
+int ledPin_0_d = 5;
+
+// SN74141 (2)
+int ledPin_1_a = 6;                
+int ledPin_1_b = 7;
+int ledPin_1_c = 8;
+int ledPin_1_d = 9;
+
+// anode pins
+int ledPin_a_1 = 10;
+int ledPin_a_2 = 11;
+int ledPin_a_3 = 12;
+int ledPin_a_4 = 13;
 
 //Function to return the compile date and time as a time_t value
 time_t compileTime(void)
@@ -103,315 +100,213 @@ time_t compileTime(void)
 }
 
 void setup() 
-{	
-	Serial.begin(9600);
-	Serial.println("Waiting for GPS time ... ");
-
-	hourFormat12();
-
+{
 	// RTC Stuff
 	setSyncProvider(RTC.get);   // the function to get the time from the RTC
 	if (timeStatus() != timeSet) {
-	   Serial.println("Unable to sync with the RTC");
-	   setTime(usEastern.toUTC(compileTime()));
+		setTime(usEastern.toUTC(compileTime()));
+		RTC.set(usEastern.toUTC(compileTime()));
 	}
 	else {
-	   Serial.println("RTC has set the system time");
 	}
-	
-	// GPS Stuff
-	serialGps.begin(9600);
-  	
-	//Sets up the time and display controls to be inputs with internal pull-up resistors enable
-	pinMode(TIME_UP, INPUT);
-	digitalWrite(TIME_UP, HIGH);
-	
-	pinMode(TIME_SET, INPUT);
-	digitalWrite(TIME_SET, HIGH);
-	
-	
-	pinMode(gLedPin_0_a, OUTPUT);      
-	pinMode(gLedPin_0_b, OUTPUT);      
-	pinMode(gLedPin_0_c, OUTPUT);      
-	pinMode(gLedPin_0_d, OUTPUT);    
-	
-	pinMode(gLedPin_1_a, OUTPUT);      
-	pinMode(gLedPin_1_b, OUTPUT);      
-	pinMode(gLedPin_1_c, OUTPUT);      
-	pinMode(gLedPin_1_d, OUTPUT);      
-	
-	pinMode(gLedPin_a_1, OUTPUT);      
-	pinMode(gLedPin_a_2, OUTPUT);      
-	pinMode(gLedPin_a_3, OUTPUT);      
-  
+
+	Serial.begin(9600);
+
+	pinMode(ledPin_0_a, OUTPUT);      
+	pinMode(ledPin_0_b, OUTPUT);      
+	pinMode(ledPin_0_c, OUTPUT);      
+	pinMode(ledPin_0_d, OUTPUT);    
+
+	pinMode(ledPin_1_a, OUTPUT);      
+	pinMode(ledPin_1_b, OUTPUT);      
+	pinMode(ledPin_1_c, OUTPUT);      
+	pinMode(ledPin_1_d, OUTPUT);      
+
+	pinMode(ledPin_a_1, OUTPUT);      
+	pinMode(ledPin_a_2, OUTPUT);      
+	pinMode(ledPin_a_3, OUTPUT);     
+
+	// NOTE: Grounding on virtual pins 14 and 15 (analog pins 0 and 1) will set the Hour and Mins.
+
+	pinMode( TIME_SET, INPUT ); // set the vertual pin 14 (pin 0 on the analog inputs ) 
+	digitalWrite(14, HIGH); // set pin 14 as a pull up resistor.
+
+	pinMode( TIME_UP, INPUT ); // set the vertual pin 15 (pin 1 on the analog inputs ) 
+	digitalWrite(15, HIGH); // set pin 15 as a pull up resistor.
+
 }
 
-void setSN74141(int icIndex, int displayNumber)
-{  
-	int a = 0;
-	int b = 0;
-	int c = 0;
-	int d = 0; // will display a zero.
-	
+void setSN74141Chips( int num2, int num1 )
+{
+	int a,b,c,d;
+
+	// set defaults.
+	a=0;b=0;c=0;d=0; // will display a zero.
+
 	// Load the a,b,c,d.. to send to the SN74141 IC (1)
-	switch( displayNumber ) {
-	case 0: 
+	switch( num1 )
+	{
+		case 0: a=0;b=0;c=0;d=0;break;
+		case 1: a=1;b=0;c=0;d=0;break;
+		case 2: a=0;b=1;c=0;d=0;break;
+		case 3: a=1;b=1;c=0;d=0;break;
+		case 4: a=0;b=0;c=1;d=0;break;
+		case 5: a=1;b=0;c=1;d=0;break;
+		case 6: a=0;b=1;c=1;d=0;break;
+		case 7: a=1;b=1;c=1;d=0;break;
+		case 8: a=0;b=0;c=0;d=1;break;
+		case 9: a=1;b=0;c=0;d=1;break;
+		default: a=1;b=1;c=1;d=1;
 		break;
-	case 1: 
-		a = 1; 
+	}  
+
+	// Write to output pins.
+	digitalWrite(ledPin_0_d, d);
+	digitalWrite(ledPin_0_c, c);
+	digitalWrite(ledPin_0_b, b);
+	digitalWrite(ledPin_0_a, a);
+
+	// Load the a,b,c,d.. to send to the SN74141 IC (2)
+	switch( num2 )
+	{
+		case 0: a=0;b=0;c=0;d=0;break;
+		case 1: a=1;b=0;c=0;d=0;break;
+		case 2: a=0;b=1;c=0;d=0;break;
+		case 3: a=1;b=1;c=0;d=0;break;
+		case 4: a=0;b=0;c=1;d=0;break;
+		case 5: a=1;b=0;c=1;d=0;break;
+		case 6: a=0;b=1;c=1;d=0;break;
+		case 7: a=1;b=1;c=1;d=0;break;
+		case 8: a=0;b=0;c=0;d=1;break;
+		case 9: a=1;b=0;c=0;d=1;break;
+		default: a=1;b=1;c=1;d=1;
 		break;
-	case 2: 
-		b = 1; 
-		break;
-	case 3: 
-		a = 1;
-		b = 1; 
-		break;
-	case 4: 
-		c = 1; 
-		break;
-	case 5: 
-		a = 1;
-		c = 1; 
-		break;
-	case 6: 
-		b = 1;
-		c = 1; 
-		break;
-	case 7: 
-		a = 1;
-		b = 1;
-		c = 1; 
-		break;
-	case 8: 
-		d = 1; 
-		break;
-	case 9: 
-		a = 1;
-		d = 1; 
-		break;
-	default: 
-		a = 1;
-		b = 1;
-		c = 1;
-		d = 1;
-		break;
-	}
-	    
-	if (0 == icIndex) { // IC1
-		// Write to output pins.
-		digitalWrite(gLedPin_0_d, d);
-		digitalWrite(gLedPin_0_c, c);
-		digitalWrite(gLedPin_0_b, b);
-		digitalWrite(gLedPin_0_a, a);
-	}
-	else { // IC2
-		// Write to output pins.
-		digitalWrite(gLedPin_1_d, d);
-		digitalWrite(gLedPin_1_c, c);
-		digitalWrite(gLedPin_1_b, b);
-		digitalWrite(gLedPin_1_a, a);
 	}
 
+	// Write to output pins
+	digitalWrite(ledPin_1_d, d);
+	digitalWrite(ledPin_1_c, c);
+	digitalWrite(ledPin_1_b, b);
+	digitalWrite(ledPin_1_a, a);
 }
 
-void displayNumberSet( int anod, int num1, int num2 ) 
+float fadeIn = 8.0f;
+float fadeOut = 8.0f;
+float fadeMax = 8.0f;
+float fadeStep = 0.4f;
+int numberArray[6]={0,0,0,0,0,0};
+int currNumberArray[6]={0,0,0,0,0,0};
+float numberArrayFadeInValue[6]={0.0f,0.0f,0.0f,0.0f,0.0f,0.0f};
+float numberArrayFadeOutValue[6]={8.0f,8.0f,8.0f,8.0f,8.0f,8.0f};
+
+void displayFadeNumberString()
 {
-	int anodPin;
-	anodPin = gLedPin_a_1; 
-  
-	// select which anod to fire.
-	switch( anod ) {
-    	case 0:    anodPin =  gLedPin_a_1;    break;
-    	case 1:    anodPin =  gLedPin_a_2;    break;
-    	case 2:    anodPin =  gLedPin_a_3;    break;
-    }  
-  
-	// send to the SN74141 IC (1)
-	setSN74141(0, num2);
-	// send to the SN74141 IC (2)
-	setSN74141(1, num1);
-    
-    // Turn on this anod.
-    digitalWrite(anodPin, HIGH);   
-    
-    // Delay
-    delay(3);
-    
-    // Shut off this anod.
-    digitalWrite(anodPin, LOW);
+	// anode channel 1 - numerals 0,3
+	setSN74141Chips(currNumberArray[0],currNumberArray[3]);   
+	digitalWrite(ledPin_a_1, HIGH);   
+	delay(numberArrayFadeOutValue[4]);
+	setSN74141Chips(numberArray[0],numberArray[3]);   
+	delay(numberArrayFadeInValue[4]);
+	digitalWrite(ledPin_a_1, LOW);
+
+	// anode channel 2 - numerals 1,4
+	setSN74141Chips(currNumberArray[1],currNumberArray[4]);   
+	digitalWrite(ledPin_a_2, HIGH);   
+	delay(numberArrayFadeOutValue[2]);
+	setSN74141Chips(numberArray[1],numberArray[4]);   
+	delay(numberArrayFadeInValue[2]);
+	digitalWrite(ledPin_a_2, LOW);
+
+	// anode channel 3 - numerals 2,5
+	setSN74141Chips(currNumberArray[2],currNumberArray[5]);   
+	digitalWrite(ledPin_a_3, HIGH);   
+	delay(numberArrayFadeOutValue[2]);
+	setSN74141Chips(numberArray[2],numberArray[5]);   
+	delay(numberArrayFadeInValue[2]);
+	digitalWrite(ledPin_a_3, LOW);
+
+	// loop thru and update all the arrays, and fades.
+	for( int i = 0 ; i < 6 ; i ++ ) {
+		if( numberArray[i] != currNumberArray[i] ) {
+			numberArrayFadeInValue[i] += fadeStep;
+			numberArrayFadeOutValue[i] -= fadeStep;
+
+			if( numberArrayFadeInValue[i] >= fadeMax ) {
+				numberArrayFadeInValue[i] = 0.0f;
+				numberArrayFadeOutValue[i] = 7.0f;
+				currNumberArray[i] = numberArray[i];
+			}
+		}
+	}  
 }
 
+long clockHourSet = 1;
+long clockMinSet  = 27;
 
-void loop() 
+int hourButtonPressed = false;
+int minButtonPressed = false;
+
+void loop()     
 {
-	while (serialGps.available()) {
-	  gps.encode(serialGps.read()); // process gps messages
+	while (Serial.available()) {
+		gps.encode(Serial.read()); // process gps messages
 	}
-	
-	// Nothing will change until millis() increments by 1000
+
 	if (millis() >= gWaitUntil) {
-		//gWaitUntil = millis() + 3600000L;   // Make sure we wait for another hour
-		gWaitUntil = millis() + 10000L;
+		gWaitUntil = millis() + 10000L; 
 		time_t gpsTime = 0;
 		gpsTime = gpsTimeSync();
 		if (0 != gpsTime) {
-			Serial.println("Got time from gps");
 			RTC.set(gpsTime);
+			gWaitUntil = millis() + 3600000L;   // Make sure we wait for another hour
 		}
 		else {
-			Serial.println("Gps time not available");
+			//Gps time not available
 		}
 	}
+	
+	// todo
+	int hourInput = digitalRead(14);  
+	int minInput  = digitalRead(15);
 
-	if (timeStatus() != timeSet) {
-		// time not set maybe flash the display
-		digitalClockDisplay();
+	if( hourInput == 0 ) {
+		hourButtonPressed = true;
 	}
-	else {
-		digitalClockDisplay();
+
+	if( minInput == 0 ) {
+		minButtonPressed = true;	
 	}
-	digitalClockDisplay2();
 
-	
-	//manualTimeAdjust();
-	
-	// test code
-	bool newData = false;
-	unsigned long chars;
-	unsigned short sentences, failed;
-	
-	// For one second we parse GPS data and report some key values
-	for (unsigned long start = millis(); millis() - start < 1000;)
-	{
-	  while (serialGps.available())
-	  {
-		char c = serialGps.read();
-		// Serial.write(c); // uncomment this line if you want to see the GPS data flowing
-		if (gps.encode(c)) // Did a new valid sentence come in?
-		  newData = true;
-	  }
+	if( hourButtonPressed == true && hourInput == 1 ) {
+		clockHourSet++;
+		hourButtonPressed = false;
 	}
-	
-	if (newData)
-	{
-	  float flat, flon;
-	  unsigned long age;
-	  gps.f_get_position(&flat, &flon, &age);
-	  Serial.print("LAT=");
-	  Serial.print(flat == TinyGPS::GPS_INVALID_F_ANGLE ? 0.0 : flat, 6);
-	  Serial.print(" LON=");
-	  Serial.print(flon == TinyGPS::GPS_INVALID_F_ANGLE ? 0.0 : flon, 6);
-	  Serial.print(" SAT=");
-	  Serial.print(gps.satellites() == TinyGPS::GPS_INVALID_SATELLITES ? 0 : gps.satellites());
-	  Serial.print(" PREC=");
-	  Serial.print(gps.hdop() == TinyGPS::GPS_INVALID_HDOP ? 0 : gps.hdop());
+
+	if( minButtonPressed == true && minInput == 1 ) {
+		clockMinSet++;
+		minButtonPressed = false;
 	}
-	
-	gps.stats(&chars, &sentences, &failed);
-	Serial.print(" CHARS=");
-	Serial.print(chars);
-	Serial.print(" SENTENCES=");
-	Serial.print(sentences);
-	Serial.print(" CSUM ERR=");
-	Serial.println(failed);
-	
-	//end test code
-}
 
-void manualTimeAdjust()
-{
-	byte timeSelect = 0;
 
-	// time Set Routine
-	boolean switchRead = 1;
-	switchRead = digitalRead(TIME_SET);
-
-	if (LOW == switchRead) {
-		while (LOW == switchRead) {
-			switchRead = digitalRead(TIME_SET);
-		} //do nothing while the switch is low
-
-		delay(10);
-		timeSelect = ((timeSelect + 1) % 7);
-	 }
-
-	 // set hours
-	 if (1 == timeSelect) {
-
-		switchRead = digitalRead(TIME_UP);
-		if (LOW == switchRead) {
-		 	while (LOW == switchRead) {
-		 		switchRead = digitalRead(TIME_UP);
-		 	} // do nothing while the switch is low
-		 	delay(10);
-		 	// add to time
-		}
-	}
-}
-
-void digitalClockDisplay2()
-{
-	
 	utc = now();
 	localTime = usEastern.toLocal(utc, &tcr);
-	
-  	// digital clock display of the time
-  	Serial.print(hour());
-  	printDigits(minute());
-  	printDigits(second());
-  	Serial.print(" ");
-  	Serial.print(day());
-  	Serial.print(" ");
-  	Serial.print(month());
-  	Serial.print(" ");
-  	Serial.print(year()); 
-  	Serial.println(); 
 
-  	// digital clock display of the local time
-  	Serial.print(hour(localTime));
-  	printDigits(minute(localTime));
-  	printDigits(second(localTime));
-  	Serial.print(" ");
-  	Serial.print(day(localTime));
-  	Serial.print(" ");
-  	Serial.print(month(localTime));
-  	Serial.print(" ");
-  	Serial.print(year(localTime)); 
-  	Serial.println(); 
-
-}
-
-void printDigits(int digits)
-{
-  // utility function for digital clock display: prints preceding colon and leading 0
-  Serial.print(":");
-  if(digits < 10)
-	Serial.print('0');
-  Serial.print(digits);
-}
-
-void digitalClockDisplay()
-{
-	utc = now();
-	localTime = usEastern.toLocal(utc, &tcr);
-	
 	int lowerHour = 0;
 	int upperHour = 0;
 	int lowerMin = 0;
 	int upperMin = 0;
 	int lowerSecond = 0;
 	int upperSecond = 0;
-	
+
 	int lowerDay = 0;
 	int upperDay = 0;
 	int lowerMonth = 0;
 	int upperMonth = 0;
 	int lowerYear = 0;
 	int upperYear = 0;
-	
+
 	int tempSec = second(localTime);
-	
+
 	// get the high and low order values for hours, min, seconds.
 	lowerHour = hour(localTime) % 10;
 	upperHour = hour(localTime) - lowerHour;
@@ -419,14 +314,15 @@ void digitalClockDisplay()
 	upperMin = minute(localTime) - lowerMin;
 	lowerSecond = tempSec % 10;
 	upperSecond = tempSec - lowerSecond;
-	
+
 	// get the high and low order values for day, month, year
 	lowerDay = day(localTime) % 10;
 	upperDay = day(localTime) - lowerDay;
 	lowerMonth = month(localTime) % 10;
 	upperMonth = month(localTime) - lowerMonth;
-	
+
 	int yy = year(localTime);
+
 	if (yy >= 2000) {
 		yy = yy - 2000;
 	}
@@ -436,10 +332,10 @@ void digitalClockDisplay()
 	else { //2012
 		yy = 12;
 	}
-	
+
 	lowerYear = yy % 10;
 	upperYear = yy - lowerYear;
-	
+
 	if( upperSecond >= 10 )  {
 		upperSecond = upperSecond / 10;
 	}
@@ -449,7 +345,7 @@ void digitalClockDisplay()
 	if( upperHour >= 10 ) {
 		upperHour = upperHour / 10;
 	}
-	
+
 	if( upperDay >= 10 )  {
 		upperDay = upperDay / 10;
 	}
@@ -460,15 +356,17 @@ void digitalClockDisplay()
 		upperYear = upperYear / 10;
 	}
 
-	// bank 1 (bulb 0,3)
-	displayNumberSet(0, lowerMin, upperHour);
-	
-	// bank 2 (bulb 1,4)
-	displayNumberSet(1, lowerHour, upperSecond);   
-	
-	// bank 3 (bulb 2,5)
-	displayNumberSet(2, lowerSecond, upperMin); 
-		
+	// fill in the Number array used to display on the tubes
+
+	numberArray[3] = upperHour;
+	numberArray[1] = lowerHour;
+	numberArray[5] = upperMin;
+	numberArray[0] = lowerMin;
+	numberArray[4] = upperSecond;  
+	numberArray[2] = lowerSecond;
+
+	// display
+	displayFadeNumberString();
 }
 
 // gps
