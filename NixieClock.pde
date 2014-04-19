@@ -1,5 +1,7 @@
 // NiXie Clock based on Arduinix shield with DS1307 RTC and GPS Sync
-// 14 March 2012 - Sharjeel Aziz (Shaji)
+// 19 April 2014 - Sharjeel Aziz (Shaji)
+//
+// Added FlorinC's Bluetooth support
 //
 // This work is licensed under the Creative Commons 
 // Attribution-ShareAlike 3.0 Unported License. To view 
@@ -34,8 +36,8 @@
 #include <Time.h>  
 #include <Wire.h>  
 #include <DS1307RTC.h>		// a basic DS1307 library that returns time as a time_t
-#include <TinyGPS.h>		// http://arduiniana.org
 #include <Timezone.h>		// https://github.com/JChristensen/Timezone
+#include <EEPROM.h>
 
 //US Eastern Time Zone (New York, Detroit)
 TimeChangeRule usEdt = {"EDT", Second, Sun, Mar, 2, -240};    //UTC - 4 hours
@@ -46,15 +48,17 @@ Timezone usEastern(usEdt, usEst);
 //lines above and uncomment the line below.
 //Timezone usEastern(100);    //assumes rules stored at EEPROM address 100
 
-TimeChangeRule *tcr;        //pointer to the time change rule, use to get TZ abbrev
+//pointer to the time change rule, use to get TZ abbrev
+TimeChangeRule *tcr;        
 time_t utc, localTime;
 
-TinyGPS gps; 
+// receive commands from serial port in this buffer;
+char cmdBuffer[30] = {0};
+byte nCrtBufIndex = 0;
 
-long gWaitUntil = 0;
-
-#define TIME_SET 14
-#define TIME_UP 15
+boolean clockDisplay = true;
+byte cmdHour, cmdMinute, cmdSecond, cmdYear, cmdMonth, cmdDay = 0;
+byte cmdFirstNumber, cmdSecondNumber, cmdThirdNumber  = 0;
 
 // SN74141 (1)
 int ledPin_0_a = 2;                
@@ -74,31 +78,6 @@ int ledPin_a_2 = 11;
 int ledPin_a_3 = 12;
 int ledPin_a_4 = 13;
 
-//Function to return the compile date and time as a time_t value
-time_t compileTime(void)
-{
-#define FUDGE 25        //fudge factor to allow for compile time (seconds, YMMV)
-
-	char *compDate = __DATE__, *compTime = __TIME__, *months = "JanFebMarAprMayJunJulAugSepOctNovDec";
-	char chMon[3], *m;
-	int d, y;
-	tmElements_t tm;
-	time_t t;
-
-	strncpy(chMon, compDate, 3);
-	chMon[3] = '\0';
-	m = strstr(months, chMon);
-	tm.Month = ((m - months) / 3 + 1);
-
-	tm.Day = atoi(compDate + 4);
-	tm.Year = atoi(compDate + 7) - 1970;
-	tm.Hour = atoi(compTime);
-	tm.Minute = atoi(compTime + 3);
-	tm.Second = atoi(compTime + 6);
-	t = makeTime(tm);
-	return t + FUDGE;        //add fudge factor to allow for compile time
-}
-
 void setup() 
 {
 	// RTC Stuff
@@ -106,8 +85,6 @@ void setup()
 	if (timeStatus() != timeSet) {
 		setTime(usEastern.toUTC(compileTime()));
 		RTC.set(usEastern.toUTC(compileTime()));
-	}
-	else {
 	}
 
 	Serial.begin(9600);
@@ -125,15 +102,6 @@ void setup()
 	pinMode(ledPin_a_1, OUTPUT);      
 	pinMode(ledPin_a_2, OUTPUT);      
 	pinMode(ledPin_a_3, OUTPUT);     
-
-	// NOTE: Grounding on virtual pins 14 and 15 (analog pins 0 and 1) will set the Hour and Mins.
-
-	pinMode( TIME_SET, INPUT ); // set the vertual pin 14 (pin 0 on the analog inputs ) 
-	digitalWrite(14, HIGH); // set pin 14 as a pull up resistor.
-
-	pinMode( TIME_UP, INPUT ); // set the vertual pin 15 (pin 1 on the analog inputs ) 
-	digitalWrite(15, HIGH); // set pin 15 as a pull up resistor.
-
 }
 
 void setSN74141Chips( int num2, int num1 )
@@ -141,7 +109,10 @@ void setSN74141Chips( int num2, int num1 )
 	int a,b,c,d;
 
 	// set defaults.
-	a=0;b=0;c=0;d=0; // will display a zero.
+	a=0;
+	b=0;
+	c=0;
+	d=0;
 
 	// Load the a,b,c,d.. to send to the SN74141 IC (1)
 	switch( num1 )
@@ -240,57 +211,98 @@ void displayFadeNumberString()
 	}  
 }
 
-long clockHourSet = 1;
-long clockMinSet  = 27;
-
-int hourButtonPressed = false;
-int minButtonPressed = false;
-
 void loop()     
 {
-	while (Serial.available()) {
-		gps.encode(Serial.read()); // process gps messages
+	checkBluetoothCommands();
+	
+	if (clockDisplay) {
+		displayTime(now());
 	}
+	else {
+		displayNumber();
+	}
+	
+	if (second(localTime) == 0) {
+		antiCathodePoisoning();
+	}
+	
+	displayFadeNumberString();
+}
 
-	if (millis() >= gWaitUntil) {
-		gWaitUntil = millis() + 10000L; 
-		time_t gpsTime = 0;
-		gpsTime = gpsTimeSync();
-		if (0 != gpsTime) {
-			RTC.set(gpsTime);
-			gWaitUntil = millis() + 3600000L;   // Make sure we wait for another hour
-		}
-		else {
-			//Gps time not available
+void antiCathodePoisoning()
+{
+	byte upperDigit = random(10);
+	byte lowerDigit = random(10);
+	numberArray[3] = upperDigit;
+	numberArray[1] = lowerDigit;
+	numberArray[5] = upperDigit;
+	numberArray[0] = lowerDigit;
+	numberArray[4] = upperDigit;  
+	numberArray[2] = lowerDigit;
+}
+
+void checkBluetoothCommands()
+{
+	while (Serial.available() > 0) {
+		// read the incoming byte;
+		char inChar = Serial.read();
+		cmdBuffer[nCrtBufIndex++] = inChar;
+		if (nCrtBufIndex >= sizeof(cmdBuffer)-1) {
+			shiftBufferLeft();
 		}
 	}
 	
-	// todo
-	int hourInput = digitalRead(14);  
-	int minInput  = digitalRead(15);
-
-	if( hourInput == 0 ) {
-		hourButtonPressed = true;
+	if (0 == strncmp(cmdBuffer, "DATE=", 5) && nCrtBufIndex > 12) {
+		// next characters are the date, formatted YY/MM/DD;
+		cmdYear = (cmdBuffer[5]-'0') * 10 + (cmdBuffer[6]-'0');
+		cmdMonth = (cmdBuffer[8]-'0') * 10 + (cmdBuffer[9]-'0');
+		cmdDay = (cmdBuffer[11]-'0') * 10 + (cmdBuffer[12]-'0');
+		updateRTCTime();
+		resetBuffer();
 	}
-
-	if( minInput == 0 ) {
-		minButtonPressed = true;	
+	else if (0 == strncmp(cmdBuffer, "TIME=", 5) && nCrtBufIndex > 12) {
+		// next characters are the time, formatted HH:MM:SS;
+		cmdHour = (cmdBuffer[5]-'0') * 10 + (cmdBuffer[6]-'0');
+		cmdMinute = (cmdBuffer[8]-'0') * 10 + (cmdBuffer[9]-'0');
+		cmdSecond = (cmdBuffer[11]-'0') * 10 + (cmdBuffer[12]-'0');
+		updateRTCTime();
+		resetBuffer();
 	}
-
-	if( hourButtonPressed == true && hourInput == 1 ) {
-		clockHourSet++;
-		hourButtonPressed = false;
+	else if (0 == strncmp(cmdBuffer, "NUMBER=", 7) && nCrtBufIndex > 14) {
+		// next characters are the time, formatted HH:MM:SS;
+		cmdFirstNumber = (cmdBuffer[7]-'0') * 10 + (cmdBuffer[8]-'0');
+		cmdSecondNumber = (cmdBuffer[10]-'0') * 10 + (cmdBuffer[11]-'0');
+		cmdThirdNumber = (cmdBuffer[13]-'0') * 10 + (cmdBuffer[14]-'0');
+		resetBuffer();
 	}
-
-	if( minButtonPressed == true && minInput == 1 ) {
-		clockMinSet++;
-		minButtonPressed = false;
+	else if (0 == strncmp(cmdBuffer, "NUMBER ON", 9)) {
+		clockDisplay = false;
+		resetBuffer();
 	}
+	else if (0 == strncmp(cmdBuffer, "NUMBER OFF", 10)) {
+		clockDisplay = true;
+		resetBuffer();
+	}
+}
 
+void shiftBufferLeft()
+{
+  for (byte i = 0; i < sizeof(cmdBuffer) - 1; i++) {
+	cmdBuffer[i] = cmdBuffer[i + 1];  
+  }
+  nCrtBufIndex--;
+}
 
-	utc = now();
-	localTime = usEastern.toLocal(utc, &tcr);
+void resetBuffer()
+{
+  for (byte i = 0; i < sizeof(cmdBuffer); i++) {
+	cmdBuffer[i] = 0;  
+  }
+  nCrtBufIndex = 0;
+}
 
+void displayNumber()
+{
 	int lowerHour = 0;
 	int upperHour = 0;
 	int lowerMin = 0;
@@ -298,43 +310,13 @@ void loop()
 	int lowerSecond = 0;
 	int upperSecond = 0;
 
-	int lowerDay = 0;
-	int upperDay = 0;
-	int lowerMonth = 0;
-	int upperMonth = 0;
-	int lowerYear = 0;
-	int upperYear = 0;
-
-	int tempSec = second(localTime);
-
 	// get the high and low order values for hours, min, seconds.
-	lowerHour = hour(localTime) % 10;
-	upperHour = hour(localTime) - lowerHour;
-	lowerMin = minute(localTime) % 10;
-	upperMin = minute(localTime) - lowerMin;
-	lowerSecond = tempSec % 10;
-	upperSecond = tempSec - lowerSecond;
-
-	// get the high and low order values for day, month, year
-	lowerDay = day(localTime) % 10;
-	upperDay = day(localTime) - lowerDay;
-	lowerMonth = month(localTime) % 10;
-	upperMonth = month(localTime) - lowerMonth;
-
-	int yy = year(localTime);
-
-	if (yy >= 2000) {
-		yy = yy - 2000;
-	}
-	else if (yy >= 1900 && yy < 2000) {
-		yy == yy - 1900;
-	}
-	else { //2012
-		yy = 12;
-	}
-
-	lowerYear = yy % 10;
-	upperYear = yy - lowerYear;
+	lowerHour = cmdFirstNumber % 10;
+	upperHour = cmdFirstNumber - lowerHour;
+	lowerMin = cmdSecondNumber % 10;
+	upperMin = cmdSecondNumber - lowerMin;
+	lowerSecond = cmdThirdNumber % 10;
+	upperSecond = cmdThirdNumber - lowerSecond;
 
 	if( upperSecond >= 10 )  {
 		upperSecond = upperSecond / 10;
@@ -346,6 +328,87 @@ void loop()
 		upperHour = upperHour / 10;
 	}
 
+	// fill in the Number array used to display on the tubes
+
+	numberArray[3] = upperHour;
+	numberArray[1] = lowerHour;
+	numberArray[5] = upperMin;
+	numberArray[0] = lowerMin;
+	numberArray[4] = upperSecond;  
+	numberArray[2] = lowerSecond;
+}
+
+void displayTime(time_t timeDisp)
+{
+	localTime = usEastern.toLocal(timeDisp, &tcr);
+	
+	int lowerHour = 0;
+	int upperHour = 0;
+	int lowerMin = 0;
+	int upperMin = 0;
+	int lowerSecond = 0;
+	int upperSecond = 0;
+		
+	// get the high and low order values for hours, min, seconds.
+	lowerHour = hourFormat12(localTime) % 10;
+	upperHour = hourFormat12(localTime) - lowerHour;
+	lowerMin = minute(localTime) % 10;
+	upperMin = minute(localTime) - lowerMin;
+	lowerSecond = second(localTime) % 10;
+	upperSecond = second(localTime) - lowerSecond;
+	
+	if( upperSecond >= 10 )  {
+		upperSecond = upperSecond / 10;
+	}
+	if( upperMin >= 10 ) {
+		upperMin = upperMin / 10;
+	}
+	if( upperHour >= 10 ) {
+		upperHour = upperHour / 10;
+	}
+	
+	// fill in the Number array used to display on the tubes
+	
+	numberArray[3] = upperHour;
+	numberArray[1] = lowerHour;
+	numberArray[5] = upperMin;
+	numberArray[0] = lowerMin;
+	numberArray[4] = upperSecond;  
+	numberArray[2] = lowerSecond;
+}
+
+void displayDate(time_t timeDisp)
+{
+	localTime = usEastern.toLocal(timeDisp, &tcr);
+	
+	int lowerDay = 0;
+	int upperDay = 0;
+	int lowerMonth = 0;
+	int upperMonth = 0;
+	int lowerYear = 0;
+	int upperYear = 0;
+			
+	// get the high and low order values for day, month, year
+	lowerDay = day(localTime) % 10;
+	upperDay = day(localTime) - lowerDay;
+	lowerMonth = month(localTime) % 10;
+	upperMonth = month(localTime) - lowerMonth;
+	
+	int yy = year(localTime);
+	
+	if (yy >= 2000) {
+		yy = yy - 2000;
+	}
+	else if (yy >= 1900 && yy < 2000) {
+		yy == yy - 1900;
+	}
+	else { //2012
+		yy = 12;
+	}
+	
+	lowerYear = yy % 10;
+	upperYear = yy - lowerYear;
+		
 	if( upperDay >= 10 )  {
 		upperDay = upperDay / 10;
 	}
@@ -355,41 +418,53 @@ void loop()
 	if( upperYear >= 10 ) {
 		upperYear = upperYear / 10;
 	}
-
+	
 	// fill in the Number array used to display on the tubes
-
-	numberArray[3] = upperHour;
-	numberArray[1] = lowerHour;
-	numberArray[5] = upperMin;
-	numberArray[0] = lowerMin;
-	numberArray[4] = upperSecond;  
-	numberArray[2] = lowerSecond;
-
-	// display
-	displayFadeNumberString();
+	numberArray[3] = upperMonth;
+	numberArray[1] = lowerMonth;
+	numberArray[5] = upperDay;
+	numberArray[0] = lowerDay;
+	numberArray[4] = upperYear;  
+	numberArray[2] = lowerYear;
 }
 
-// gps
-time_t gpsTimeSync()
+void updateRTCTime()
 {
-	//  returns time if avail from gps, else returns 0
-	unsigned long fix_age = 0 ;
-	gps.get_datetime(NULL, NULL, &fix_age);
-	unsigned long time_since_last_fix;
-	if(fix_age < 1000) {
-		return gpsTimeToArduinoTime(); // return time only if updated recently by gps
-	}  
-	return 0;
-}
-
-time_t gpsTimeToArduinoTime()
-{
-	// returns time_t from gps date and time with the given offset hours
 	tmElements_t tm;
-	int year;
-	gps.crack_datetime(&year, &tm.Month, &tm.Day, &tm.Hour, &tm.Minute, &tm.Second, NULL, NULL);
-	tm.Year = year - 1970; 
+	// offset from 1970;
+	tm.Year = (cmdYear + 2000) - 1970;
+	tm.Month = cmdMonth;
+	tm.Day = cmdDay;
+	tm.Hour = cmdHour;
+	tm.Minute = cmdMinute;
+	tm.Second = cmdSecond;
 	time_t time = makeTime(tm);
-	return time;
+	
+	RTC.set(time);
+	setTime(time);
 }
 
+//Function to return the compile date and time as a time_t value
+time_t compileTime(void)
+{
+#define FUDGE 25        //fudge factor to allow for compile time (seconds, YMMV)
+
+	char *compDate = __DATE__, *compTime = __TIME__, *months = "JanFebMarAprMayJunJulAugSepOctNovDec";
+	char chMon[3], *m;
+	int d, y;
+	tmElements_t tm;
+	time_t t;
+
+	strncpy(chMon, compDate, 3);
+	chMon[3] = '\0';
+	m = strstr(months, chMon);
+	tm.Month = ((m - months) / 3 + 1);
+
+	tm.Day = atoi(compDate + 4);
+	tm.Year = atoi(compDate + 7) - 1970;
+	tm.Hour = atoi(compTime);
+	tm.Minute = atoi(compTime + 3);
+	tm.Second = atoi(compTime + 6);
+	t = makeTime(tm);
+	return t + FUDGE;        //add fudge factor to allow for compile time
+}
