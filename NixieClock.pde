@@ -1,7 +1,5 @@
-// NiXie Clock based on Arduinix shield with DS1307 RTC and GPS Sync
+// NiXie Clock based on Arduinix shield with DS1307 RTC and Bluetooth Sync
 // 19 April 2014 - Sharjeel Aziz (Shaji)
-//
-// Added FlorinC's Bluetooth support
 //
 // This work is licensed under the Creative Commons 
 // Attribution-ShareAlike 3.0 Unported License. To view 
@@ -13,11 +11,10 @@
 // fading transitions sketch for 4-tube board with default connections.
 // based on 6-tube sketch by Emblazed
 // 06/16/2011 - 4-tube-itized by Dave B.
-// 
 // 08/19/2011 - modded for six bulb board, hours, minutes, seconds by Brad L.
-//
 // 09/03/2011 - Added Poxin's 12 hour setting for removing 00 from hours when set to 12 hour time
 // 11/01/2011 - Fixed second to last crossfading digit error, help from Warcabbit - Brad L.
+// 04/19/2014 - Added FlorinC's Bluetooth support
 
 
 // SN74141 : Truth Table
@@ -252,24 +249,19 @@ void checkBluetoothCommands()
 		}
 	}
 	
-	if (0 == strncmp(cmdBuffer, "DATE=", 5) && nCrtBufIndex > 12) {
-		// next characters are the date, formatted YY/MM/DD;
+	if (0 == strncmp(cmdBuffer, "TIME=", 5) && nCrtBufIndex > 21) {
+		// next characters are the date, formatted YY/MM/DD HH:MM:SS
+		// This only records the date TIME= actually sets the time
 		cmdYear = (cmdBuffer[5]-'0') * 10 + (cmdBuffer[6]-'0');
 		cmdMonth = (cmdBuffer[8]-'0') * 10 + (cmdBuffer[9]-'0');
 		cmdDay = (cmdBuffer[11]-'0') * 10 + (cmdBuffer[12]-'0');
-		updateRTCTime();
-		resetBuffer();
-	}
-	else if (0 == strncmp(cmdBuffer, "TIME=", 5) && nCrtBufIndex > 12) {
-		// next characters are the time, formatted HH:MM:SS;
-		cmdHour = (cmdBuffer[5]-'0') * 10 + (cmdBuffer[6]-'0');
-		cmdMinute = (cmdBuffer[8]-'0') * 10 + (cmdBuffer[9]-'0');
-		cmdSecond = (cmdBuffer[11]-'0') * 10 + (cmdBuffer[12]-'0');
+		cmdHour = (cmdBuffer[14]-'0') * 10 + (cmdBuffer[15]-'0');
+		cmdMinute = (cmdBuffer[17]-'0') * 10 + (cmdBuffer[18]-'0');
+		cmdSecond = (cmdBuffer[20]-'0') * 10 + (cmdBuffer[21]-'0');
 		updateRTCTime();
 		resetBuffer();
 	}
 	else if (0 == strncmp(cmdBuffer, "NUMBER=", 7) && nCrtBufIndex > 14) {
-		// next characters are the time, formatted HH:MM:SS;
 		cmdFirstNumber = (cmdBuffer[7]-'0') * 10 + (cmdBuffer[8]-'0');
 		cmdSecondNumber = (cmdBuffer[10]-'0') * 10 + (cmdBuffer[11]-'0');
 		cmdThirdNumber = (cmdBuffer[13]-'0') * 10 + (cmdBuffer[14]-'0');
