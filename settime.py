@@ -14,6 +14,15 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+# Note:
+# Pair the HC05 device first using code 1234 and then setup the comm device using:
+# sudo rfcomm bind hci0 00:13:12:25:40:54 
+
+# sudo apt-get install -y python3-ntplib
+# pip3 install pyserial
+
+# sudo python3 settime.py --device /dev/rfcomm0 --ntp
+
 import serial, time, datetime, argparse
 
 parser = argparse.ArgumentParser()
@@ -29,21 +38,21 @@ serial.read(1000)
 serial.timeout = 0
 
 if args.ntp:
-	print "Setting time using ntp server"
+	print("Setting time using ntp server")
 	import ntplib
 	c = ntplib.NTPClient()
 	r = c.request("pool.ntp.org", version = 3)
 	dt = datetime.datetime.utcfromtimestamp(round(r.tx_time))
 elif args.command:
-	print "Setting time from command %s" % args.command
+	print("Setting time from command %s" % args.command)
 	dt = datetime.datetime.strptime(args.command, "%y-%m-%d %H:%M:%S")
 else:
-	print "Setting time from host"
+	print("Setting time from host")
 	dt = datetime.datetime.utcnow()
 	dt = dt.replace(second = int(round(dt.second + (float(dt.microsecond) / 1000000))), microsecond = 0)
 
 timeCommand = "TIME=%s" % dt.strftime("%y/%m/%d %H:%M:%S")
-serial.write(timeCommand)
-print "Date and time updated to %s" % dt.isoformat(' ')
+serial.write(timeCommand.encode())
+print("Date and time updated to %s" % dt.isoformat(' '))
 serial.close()
 
