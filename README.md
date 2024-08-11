@@ -1,4 +1,4 @@
-nixieclock
+nixieclock 2
 ==========
 
-Arduino based nixie tubes clock using [Arduinix shield](http://arduinix.com/), DS1307 RTC, and HC05 Bluetooth module. The current time can be set using commands sent over a bluetooth connection. 
+Arduino based nixie tubes clock using [Arduinix shield](http://arduinix.com/) and [Arduino UNO RF WiFi](https://store-usa.arduino.cc/products/uno-r4-wifi?selectedStore=us). Automatically syncs time every hour using NTP.

@@ -32,7 +32,6 @@
 
 #include <Time.h>  
 #include <Wire.h>  
-#include <DS1307RTC.h>		// a basic DS1307 library that returns time as a time_t
 #include <Timezone.h>		// https://github.com/JChristensen/Timezone
 #include <EEPROM.h>
 
@@ -78,10 +77,10 @@ int ledPin_a_4 = 13;
 void setup() 
 {
 	// RTC Stuff
-	setSyncProvider(RTC.get);   // the function to get the time from the RTC
+	//setSyncProvider(RTC.get);   // the function to get the time from the RTC
 	if (timeStatus() != timeSet) {
 		setTime(usEastern.toUTC(compileTime()));
-		RTC.set(usEastern.toUTC(compileTime()));
+		//RTC.set(usEastern.toUTC(compileTime()));
 	}
 
 	Serial.begin(9600);
@@ -432,7 +431,7 @@ void updateRTCTime()
 	tm.Second = cmdSecond;
 	time_t time = makeTime(tm);
 	
-	RTC.set(time);
+	//RTC.set(time);
 	setTime(time);
 }
 
