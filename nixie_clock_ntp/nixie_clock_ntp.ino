@@ -23,8 +23,13 @@
 //H,L,L,L 8
 //H,L,L,H 9 
 
-// Include the RTC library
-#include "RTC.h"
+#include <I2C_RTC.h>
+
+//static DS1307 RTC;
+static DS3231 RTC;
+//static PCF8523 RTC;
+//static PCF8563 RTC;
+//static MCP7940 RTC;
 
 //Include the NTP library
 #include <NTPClient.h>
@@ -76,8 +81,10 @@ int ledPin_a_2 = 11;
 int ledPin_a_3 = 12;
 int ledPin_a_4 = 13;
 
-unsigned long currentMillis;
-unsigned long previousMillis = 0;
+unsigned long delayInterval = 60000UL;
+unsigned long previousDelayMillis = 0UL;
+unsigned long previousNtpMillis = 0UL;
+unsigned long ntpInterval = 43200000UL;
 
 char ssid[] = WIFI_SSID;    // your network SSID (name)
 char pass[] = WIFI_PASS;    // your network password (use for WPA, or use as key for WEP)
@@ -150,10 +157,8 @@ void connectToWiFi() {
   printWifiStatus();
 }
 
-bool isDaylightSavingTime(int year, Month month, int day, int hour) {
+bool isDaylightSavingTime(int year, int month, int day, int hour) {
   
-  int tmMonth = Month2int(month);
-
   // Calculate the second Sunday in March
   int secondSundayMarch = 14 - (1 + ((year * 5) / 4)) % 7;
   
@@ -161,15 +166,15 @@ bool isDaylightSavingTime(int year, Month month, int day, int hour) {
   int firstSundayNovember = 7 - ((year + year / 4) % 7);
 
   // Check if the current date is within DST period
-  if (tmMonth > 3 && tmMonth < 11) {
+  if (month > 3 && month < 11) {
     return true; // April to October is within DST
   }
-  if (tmMonth == 3) {
+  if (month == 3) {
     if (day > secondSundayMarch || (day == secondSundayMarch && hour >= 2)) {
       return true;
     }
   }
-  if (tmMonth == 11) {
+  if (month == 11) {
     if (day < firstSundayNovember || (day == firstSundayNovember && hour < 2)) {
       return true;
     }
@@ -453,13 +458,14 @@ void updateTime(auto timeZoneOffsetHours) {
 
   Serial.print("Unix time = ");
   Serial.println(unixTime);
-  RTCTime timeToSet = RTCTime(unixTime);
-  RTC.setTime(timeToSet);
+  RTC.setEpoch(unixTime);
 
   // Retrieve the date and time from the RTC and print them
-  RTCTime currentTime;
-  RTC.getTime(currentTime); 
-  Serial.println("The RTC was just set to: " + String(currentTime));
+  Serial.print(RTC.getHours());
+  Serial.print(":");
+  Serial.print(RTC.getMinutes());
+  Serial.print(":");
+  Serial.print(RTC.getSeconds());
 
 }
 
@@ -472,11 +478,8 @@ void setup() {
 
   connectToWiFi();
   updateTime(timeZoneOffsetHours);
-
-  RTCTime currentTime;
-  RTC.getTime(currentTime); 
   
-  if (isDaylightSavingTime(currentTime.getYear(), currentTime.getMonth(),   currentTime.getDayOfMonth(), currentTime.getHour())) {  
+  if (isDaylightSavingTime(RTC.getYear(), RTC.getMonth(), RTC.getDay(), RTC.getHours())) {  
     timeZoneOffsetHours = TIMEZONE_OFFSET_HOURS - 1;
     updateTime(timeZoneOffsetHours);
   }
@@ -502,25 +505,38 @@ void setup() {
 void loop() {
 
   auto timeZoneOffsetHours = TIMEZONE_OFFSET_HOURS;
- 
-  RTCTime currentTime;
-  RTC.getTime(currentTime);
+  
+  unsigned long currentMillis = millis();
 
-  if (isDaylightSavingTime(currentTime.getYear(), currentTime.getMonth(),   currentTime.getDayOfMonth(), currentTime.getHour())) {  
-    timeZoneOffsetHours = TIMEZONE_OFFSET_HOURS - 1;
+  // check if time is set and adjust the interval accordingly
+  unsigned long adjustedInterval = ntpInterval;
+  if (!timeClient.isTimeSet()) {
+    adjustedInterval = 10 * 60 * 1000;  // 10 minutes in milliseconds
+    // Retrieve the date and time from the RTC and print them
   }
-
-  currentMillis = millis();
-  if (currentMillis - previousMillis > 3600000) {  // 1 hour
+  
+  if (currentMillis - previousNtpMillis > ntpInterval ) {
+    if (isDaylightSavingTime(RTC.getYear(), RTC.getMonth(), RTC.getDay(), RTC.getHours())) {  
+      timeZoneOffsetHours = TIMEZONE_OFFSET_HOURS - 1;
+    } 
     updateTime(timeZoneOffsetHours);
-    previousMillis = currentMillis;
+    previousNtpMillis = currentMillis;
   }
 
-	displayTime(currentTime.getHour(), currentTime.getMinutes(), currentTime.getSeconds());
-	
-	if (currentTime.getSeconds() == 0) {
-		antiCathodePoisoning();
+  if(currentMillis - previousDelayMillis > delayInterval) {
+    // Retrieve the date and time from the RTC and print them
+    Serial.print(RTC.getHours());
+    Serial.print(":");
+    Serial.print(RTC.getMinutes());
+    Serial.print(":");
+    Serial.print(RTC.getSeconds());
+ 	  previousDelayMillis = currentMillis;
+  }
+
+  displayTime(RTC.getHours(), RTC.getMinutes(), RTC.getSeconds());
+	if (RTC.getSeconds() == 0) {
+	    antiCathodePoisoning();
 	}
-	
-	displayFadeNumberString();
+  displayFadeNumberString();
 }
+
