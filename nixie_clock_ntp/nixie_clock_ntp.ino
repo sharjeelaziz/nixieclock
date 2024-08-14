@@ -455,11 +455,11 @@ void updateTime(auto timeZoneOffsetHours) {
   else {
     unixTime = unixTime - (timeZoneOffsetHours * 3600);
   }
+  RTC.setEpoch(unixTime);
 
   Serial.print("Unix time = ");
   Serial.println(unixTime);
-  RTC.setEpoch(unixTime);
-
+  
   // Retrieve the date and time from the RTC and print them
   Serial.print(RTC.getHours());
   Serial.print(":");
@@ -508,14 +508,13 @@ void loop() {
   
   unsigned long currentMillis = millis();
 
-  // check if time is set and adjust the interval accordingly
+  // check if time is set and if not try to update often
   unsigned long adjustedInterval = ntpInterval;
   if (!timeClient.isTimeSet()) {
     adjustedInterval = 10 * 60 * 1000;  // 10 minutes in milliseconds
-    // Retrieve the date and time from the RTC and print them
   }
   
-  if (currentMillis - previousNtpMillis > ntpInterval ) {
+  if (currentMillis - previousNtpMillis > adjustedInterval ) {
     if (isDaylightSavingTime(RTC.getYear(), RTC.getMonth(), RTC.getDay(), RTC.getHours())) {  
       timeZoneOffsetHours = TIMEZONE_OFFSET_HOURS - 1;
     } 
@@ -529,7 +528,7 @@ void loop() {
     Serial.print(":");
     Serial.print(RTC.getMinutes());
     Serial.print(":");
-    Serial.print(RTC.getSeconds());
+    Serial.println(RTC.getSeconds());
  	  previousDelayMillis = currentMillis;
   }
 
