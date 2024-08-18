@@ -81,17 +81,16 @@ int ledPin_a_2 = 11;
 int ledPin_a_3 = 12;
 int ledPin_a_4 = 13;
 
-unsigned long delayInterval = 60000UL;
-unsigned long previousDelayMillis = 0UL;
-unsigned long previousNtpMillis = 0UL;
-unsigned long ntpInterval = 43200000UL;
+unsigned long previousMillis = 0UL;
+unsigned long ntpInterval = 1200000UL; //20 minutes
 
 char ssid[] = WIFI_SSID;    // your network SSID (name)
 char pass[] = WIFI_PASS;    // your network password (use for WPA, or use as key for WEP)
 
 int wifiStatus = WL_IDLE_STATUS;
 WiFiUDP Udp; // A UDP instance to let us send and receive packets over UDP
-NTPClient timeClient(Udp);
+
+NTPClient timeClient(Udp, "192.168.70.156", 0, ntpInterval);
 
 ArduinoLEDMatrix matrix;
 
@@ -443,30 +442,29 @@ void displayDate(int day, int month, int year) {
 void updateTime(auto timeZoneOffsetHours) {
 
   yield();  
-  RTC.begin();
+  
   Serial.println("\nStarting connection to server...");
-  timeClient.begin();
+  
   timeClient.update();
 
-  auto unixTime = timeClient.getEpochTime();
-  if (0 == TIMEZONE_BEHIND_UTC) {
-    unixTime = unixTime + (timeZoneOffsetHours * 3600);
+  if (timeClient.isTimeSet()) {
+    auto unixTime = timeClient.getEpochTime();
+    if (0 == TIMEZONE_BEHIND_UTC) {
+      unixTime = unixTime + (timeZoneOffsetHours * 3600);
+    }
+    else {
+      unixTime = unixTime - (timeZoneOffsetHours * 3600);
+    }
+    RTC.setEpoch(unixTime);
+    Serial.print("Unix time = ");
+    Serial.println(unixTime);
+      // Retrieve the date and time from the RTC and print them
+    Serial.print(RTC.getHours());
+    Serial.print(":");
+    Serial.print(RTC.getMinutes());
+    Serial.print(":");
+    Serial.print(RTC.getSeconds());
   }
-  else {
-    unixTime = unixTime - (timeZoneOffsetHours * 3600);
-  }
-  RTC.setEpoch(unixTime);
-
-  Serial.print("Unix time = ");
-  Serial.println(unixTime);
-  
-  // Retrieve the date and time from the RTC and print them
-  Serial.print(RTC.getHours());
-  Serial.print(":");
-  Serial.print(RTC.getMinutes());
-  Serial.print(":");
-  Serial.print(RTC.getSeconds());
-
 }
 
 void setup() {
@@ -476,7 +474,10 @@ void setup() {
 
   auto timeZoneOffsetHours = TIMEZONE_OFFSET_HOURS;
 
+  RTC.begin();
   connectToWiFi();
+  timeClient.begin();
+  
   updateTime(timeZoneOffsetHours);
   
   if (isDaylightSavingTime(RTC.getYear(), RTC.getMonth(), RTC.getDay(), RTC.getHours())) {  
@@ -507,29 +508,13 @@ void loop() {
   auto timeZoneOffsetHours = TIMEZONE_OFFSET_HOURS;
   
   unsigned long currentMillis = millis();
-
-  // check if time is set and if not try to update often
-  unsigned long adjustedInterval = ntpInterval;
-  if (!timeClient.isTimeSet()) {
-    adjustedInterval = 10 * 60 * 1000;  // 10 minutes in milliseconds
-  }
   
-  if (currentMillis - previousNtpMillis > adjustedInterval ) {
+  if (currentMillis - previousMillis > ntpInterval ) {
     if (isDaylightSavingTime(RTC.getYear(), RTC.getMonth(), RTC.getDay(), RTC.getHours())) {  
       timeZoneOffsetHours = TIMEZONE_OFFSET_HOURS - 1;
     } 
     updateTime(timeZoneOffsetHours);
-    previousNtpMillis = currentMillis;
-  }
-
-  if(currentMillis - previousDelayMillis > delayInterval) {
-    // Retrieve the date and time from the RTC and print them
-    Serial.print(RTC.getHours());
-    Serial.print(":");
-    Serial.print(RTC.getMinutes());
-    Serial.print(":");
-    Serial.println(RTC.getSeconds());
- 	  previousDelayMillis = currentMillis;
+    previousMillis = currentMillis;
   }
 
   displayTime(RTC.getHours(), RTC.getMinutes(), RTC.getSeconds());
